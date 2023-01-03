@@ -1,0 +1,11 @@
+__pycache__
+data/Taskmaster
+data/dstc8-schema-guided-dialogue
+data/multiwoz
+data/*.zip
+.vscode
+.idea/*
+data/
+output/
+test_dials.json
+data_stat.csv
