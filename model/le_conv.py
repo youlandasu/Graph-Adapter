@@ -1,6 +1,6 @@
 import torch
-from torch.nn import Parameter
-from torch_geometric.utils import remove_self_loops, add_self_loops/home/ruolin/Graph-Adapter/t5-small
+import torch.nn as nn
+from torch_geometric.utils import remove_self_loops, add_self_loops
 from torch_scatter import scatter_add
 
 from torch_geometric.nn.inits import uniform

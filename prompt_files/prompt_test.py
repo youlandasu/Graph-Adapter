@@ -28,6 +28,11 @@ def predict_t5(model, tokenizer, batch, batch_ds, batch_dials):
     if dst_decoder_input_ids is not None:
         dst_decoder_input_ids = dst_decoder_input_ids.to(DEVICE)
 
+    # prepare batch graph for test
+    batch_graph = batch['batch_graph'].to(DEVICE)
+    #x, edge_index, batch = batch_graph.x, batch_graph.edge_index, batch_graph.batch
+    #print(batch_dials[0]['state'] )
+
     if dst_decoder_input_ids is not None:
         outputs = model.generate(
             input_ids=dst_input_ids,
@@ -36,6 +41,7 @@ def predict_t5(model, tokenizer, batch, batch_ds, batch_dials):
             use_cache=False,
             return_dict_in_generate=True,
             max_length=100,
+            batch_graph=batch_graph,
         )
     else:
         outputs = model.generate(
@@ -44,6 +50,7 @@ def predict_t5(model, tokenizer, batch, batch_ds, batch_dials):
             use_cache=False,
             return_dict_in_generate=True,
             max_length=100,
+            batch_graph=batch_graph,
         )
 
     dst_predictions = tokenizer.batch_decode(outputs.sequences, skip_special_tokens=False,
@@ -61,6 +68,7 @@ def predict_t5(model, tokenizer, batch, batch_ds, batch_dials):
     #     print(p)
     #     input()
 
+    # process predicted values
     for i, (pred_str, ds_str) in enumerate(zip(dst_predictions, batch_ds)):
         ds_list = ds_str.split()
         # assert 'pred_state' not in batch_dials[i]
@@ -139,6 +147,7 @@ def predict(model, dataset, tokenizer, args, test_domain_ids=None):
             # elif args.model_type == 'gpt2':
             #     predict_gpt2(model, tokenizer, batch, batch_ds, batch_dials)
 
+        # compute metric
         slot_acc = {ds: 0 for ds in dss}
         joint_total = 0
         joint_acc = 0
@@ -193,6 +202,7 @@ def prompt5_predict(model, dataset:MemT5PromptDSTDataset, tokenizer, args, test_
             elif args.model_type == 'gpt2':
                 predict_gpt2(model, tokenizer, batch, batch_ds, batch_dials)
 
+        # compute metric
         slot_acc = {ds: 0 for ds in slots}
         joint_total = 0
         joint_acc = 0

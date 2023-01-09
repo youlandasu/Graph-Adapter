@@ -7,7 +7,7 @@ import torch.nn as nn
 from torch_scatter import scatter_add, scatter_max
 
 from torch_geometric.nn import GCNConv
-from le_conv import LEConv
+from model.le_conv import LEConv
 from torch_geometric.utils import add_remaining_self_loops, remove_self_loops, softmax
 from torch_geometric.nn.pool.topk_pool import topk
 from torch_geometric.utils.loop import add_self_loops
@@ -42,7 +42,7 @@ def graph_connectivity(perm, edge_index, edge_weight, score, ratio, batch, num_n
     perm2 = perm.view(-1, 1)
     
     # mask contains bool mask of edges which originate from perm (selected) nodes
-    mask = (edge_index[0]==perm2).sum(0, dtype=torch.uint8)
+    mask = (edge_index[0]==perm2).sum(0, dtype=torch.bool)
     
     # create the S
     S0 = edge_index[1][mask].view(1, -1)

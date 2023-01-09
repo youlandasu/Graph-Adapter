@@ -20,7 +20,7 @@ SPECIAL_TOKENS = ["<bos>", "<eos>", "<speaker1>", "<speaker2>", "<pad>"]
 ATTR_TO_SPECIAL_TOKEN = {'bos_token': '<bos>', 'eos_token': '<eos>', 'pad_token': '<pad>',
                          'additional_special_tokens': ['<speaker1>', '<speaker2>']}
 MODEL_INPUTS = ["input_ids", "lm_labels", "token_type_ids"]
-
+random.seed(42)
 
 def parse_utt2state(text):
     API = OrderedDict()
@@ -414,7 +414,8 @@ def get_data_loaders(args, tokenizer, test=False, inclusive_domains=None, max_tr
             elif (args.task_type == "NLG"):
                 datasets[split][tasks_id] = get_NLG_from_dial(args, task, tasks_id, tokenizer)
 
-    # TO EVALUATE: No prompt?
+    # if not continual learning, no need "state" for each example
+    # e.g. "state": {"sgd_events_2-city": "seattle, wa", "sgd_events_2-date": "next friday", "sgd_events_2-event_type": "music"}
     if 'PROMPT' not in args.CL:
         for split in datasets.keys():
             for tasks_id, dials in datasets[split].items():
@@ -469,7 +470,7 @@ def get_data_loaders(args, tokenizer, test=False, inclusive_domains=None, max_tr
     val_datasets = {}
     test_loaders = {}
 
-    if (args.CL != "MULTI"):
+    if (args.CL != "MULTI"): # default
         if (not test):
             for task_id, dataset_task in datasets["train"].items():
                 if (task_id in common_task_id):

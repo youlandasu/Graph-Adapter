@@ -23,7 +23,7 @@ from prompt_files.lightning_utils.lightning_base import BaseTransformer, add_gen
 from prompt_files.p_tuning.modeling_prompt_t5 import T5ForPromptEncDecDST
 from prompt_files.prompt_test import predict_t5
 from prompt_files.t5_model.tokenization_t5 import T5Tokenizer
-from prompt_files.prompts_config import PROMPT_TOKENS, UNUSED_TOKENS, META_PROMPT_TOKENS
+from prompt_files.prompts_config import PROMPT_TOKENS, UNUSED_TOKENS, META_PROMPT_TOKENS, GRAPH_PROMPT_TOKENS
 from prompt_files.prompt_dataset import MemT5PromptDSTDataset
 from prompt_files.prompt_test import predict_t5
 from pathlib import Path
@@ -63,6 +63,7 @@ class MemT5PromptDSTModule(BaseTransformer):
         tokenizer.add_tokens(UNUSED_TOKENS)
         assert len(tokenizer) == model.config.vocab_size
         tokenizer.add_tokens(PROMPT_TOKENS)
+        tokenizer.add_tokens(GRAPH_PROMPT_TOKENS)
         tokenizer.add_tokens(META_PROMPT_TOKENS)
 
         super().__init__(self.hparams, num_labels=None, model=model, tokenizer=tokenizer, **kwargs)
@@ -133,6 +134,22 @@ class MemT5PromptDSTModule(BaseTransformer):
                     "weight_decay": 0.0,
                     "lr": self.hparams.meta_lr
                 },
+                {
+                    "params": model.graph_prompt_embedder.parameters(),
+                    "weight_decay": self.hparams.weight_decay,
+                    "lr": self.hparams.meta_lr
+                },
+                {
+                    "params": model.graph_prompt_bias.parameters(),
+                    "weight_decay": 0.0,
+                    "lr": self.hparams.meta_lr
+                },
+                {
+                    "params": model.graph.parameters(),
+                    "weight_decay": self.hparams.graph_wd, #5e-4
+                    "lr": self.hparams.graph_lr # 0.01
+                },
+
             ]
         elif self.training_prompt_name == 'first_prompt':
             optimizer_grouped_parameters = [
@@ -181,7 +198,7 @@ class MemT5PromptDSTModule(BaseTransformer):
         attention_mask_womask = batch['attention_mask_womask']
         labels = batch['target_ids_womask']
         labels[labels >= self.model.vocab_size] = pad_token_id
-        graph_data = batch['graph_data']
+        batch_graph = batch['batch_graph']
         #slot_connect = batch['slot_connect']
         #ds_ids = batch['ds_ids']
         #ds_mask = batch['ds_mask']
@@ -196,7 +213,7 @@ class MemT5PromptDSTModule(BaseTransformer):
             #slot_connect=slot_connect,
             #ds_ids=ds_ids,
             #ds_mask=ds_mask,
-            graph_data = graph_data,
+            batch_graph = batch_graph,
         )
 
         if self.hparams.label_smoothing == 0:
@@ -222,7 +239,7 @@ class MemT5PromptDSTModule(BaseTransformer):
         #slot_connect = batch['slot_connect'].to(DEVICE)
         #ds_ids = batch['ds_ids'].to(DEVICE)
         #ds_mask = batch['ds_mask'].to(DEVICE)
-        graph_data = batch['graph_data'].to(DEVICE)
+        batch_graph = batch['batch_graph'].to(DEVICE)
         
 
         if dst_decoder_input_ids is not None:
@@ -236,7 +253,7 @@ class MemT5PromptDSTModule(BaseTransformer):
                 #slot_connect=slot_connect,
                 #ds_ids=ds_ids,
                 #ds_mask=ds_mask,
-                graph_data=graph_data,
+                batch_graph=batch_graph,
             )
         else:
             outputs = self.model.generate(
@@ -246,7 +263,7 @@ class MemT5PromptDSTModule(BaseTransformer):
                 return_dict_in_generate=True,
                 max_length=max_length,
                 #slot_connect=slot_connect,
-                graph_data=graph_data,
+                batch_graph=batch_graph,
             )
         dst_predictions = self.tokenizer.batch_decode(outputs.sequences, skip_special_tokens=False,
                                                       clean_up_tokenization_spaces=True)
@@ -333,6 +350,7 @@ class MemT5PromptDSTModule(BaseTransformer):
                 metrics[dst_key] = sum([x[dst_key] for x in validation_step_outputs])
             metrics['jga'] = metrics['acc'] / metrics['total']
             tb_logger.add_scalar('jga/{}'.format(self.cur_domain), metrics['jga'], self.num_step)
+        self.log("Metrics logger each epoch.", metrics, on_step=False, on_epoch=True)
         return metrics
 
     def save_metrics(self, latest_metrics, type_path) -> None:
@@ -349,83 +367,12 @@ class MemT5PromptDSTModule(BaseTransformer):
         """
         logger.info('load {} loader for {} on {} domain'.format(type_path, self.training_prompt_name, self.cur_domain))
         assert type_path in ['train', 'dev']
-        if self.hparams.multi:
-            assert self.training_prompt_name == 'meta_prompt'
-            dataloader = DataLoader(
-                self.dataset[type_path],
-                num_workers=self.hparams.num_workers,
-                collate_fn=self.dataset[type_path].collate_fn,
-                batch_sampler=self.dataset[type_path].make_full_data_sampler(batch_size=batch_size))
-        else:
-            # TODO
-            # ['RAND_PROMPT', 'FW_PROMPT', 'FWBW_PROMPT']
-            if self.hparams.CL == 'RAND_PROMPT':
-                assert len(self.forward_domains) == 0
-            else:
-                if self.hparams.CL == 'FW_PROMPT':
-                    if self.training_prompt_name == 'meta_prompt':
-                        do_real_augment = (type_path=='train') and self.hparams.aug_train_metaprompt
-                        if type_path == 'train' and self.current_epoch == 0:
-                            do_generate_fake = (type_path=='train') and self.hparams.generate_fake_example
-                            if do_generate_fake:
-                                self.fake_examples = self.generate_fake_examples(self.forward_domains)
-                        self.dataset[type_path].resample_dataset(self.cur_domain, self.training_prompt_name,
-                                                                 self.forward_domains, do_augment=do_real_augment,
-                                                                 fake_examples=self.fake_examples)
-                    else:
-                        self.dataset[type_path].resample_dataset(self.cur_domain, self.training_prompt_name)
-                elif self.hparams.CL == 'FWBW_PROMPT':
-                    if self.training_prompt_name == 'meta_prompt':
-                        do_real_augment = (type_path == 'train') and self.hparams.aug_train_metaprompt
-                        if type_path == 'train' and self.current_epoch == 0:
-                            do_generate_fake = (type_path=='train') and self.hparams.generate_fake_example
-                            if do_generate_fake:
-                                self.fake_examples = self.generate_fake_examples([self.backward_domain])
-                        if self.backward_domain is None:
-                            self.dataset[type_path].resample_dataset(self.cur_domain, self.training_prompt_name,
-                                                                     self.forward_domains, do_augment=do_real_augment,
-                                                                     fake_examples=self.fake_examples)
-                        else:
-                            self.dataset[type_path].resample_dataset(self.cur_domain, self.training_prompt_name,
-                                                                     do_augment=do_real_augment,
-                                                                     backward_domain=self.backward_domain,
-                                                                     fake_examples=self.fake_examples)
-                            self.pos_grad, self.neg_grad = 0, 0
-                    else:
-                        self.dataset[type_path].resample_dataset(self.cur_domain, self.training_prompt_name)
-
-            if self.hparams.CL == 'FWBW_PROMPT' and self.backward_domain is not None and type_path == 'dev':
-                assert self.training_prompt_name == 'meta_prompt'
-                self.dataset['train'].resample_dataset(self.cur_domain, self.training_prompt_name,
-                                                       backward_domain=self.backward_domain)
-                memory_dataloader = DataLoader(
-                    self.dataset['train'],
-                    num_workers=self.hparams.num_workers,
-                    collate_fn=self.dataset['train'].collate_fn,
-                    batch_sampler=self.dataset['train'].make_domain_sampler(batch_size=batch_size,
-                                                                            target_domain='memory'))
-                logger.info('memory_dataloader len {}'.format(len(memory_dataloader)))
-                return memory_dataloader
-
-            dataloader = DataLoader(
-                self.dataset[type_path],
-                num_workers=self.hparams.num_workers,
-                collate_fn=self.dataset[type_path].collate_fn,
-                batch_sampler=self.dataset[type_path].make_domain_sampler(batch_size=batch_size,
-                                                                          target_domain=self.cur_domain))
-
-            if self.hparams.CL == 'FWBW_PROMPT' and self.backward_domain is not None and type_path == 'train':
-                assert self.training_prompt_name == 'meta_prompt'
-                memory_dataloader = DataLoader(
-                    self.dataset[type_path],
-                    num_workers=self.hparams.num_workers,
-                    collate_fn=self.dataset[type_path].collate_fn,
-                    batch_sampler=self.dataset[type_path].make_domain_sampler(batch_size=batch_size,
-                                                                              target_domain='memory'))
-                self.memory_dataloader = memory_dataloader
-                logger.info('dataloader len {}'.format(len(dataloader)))
-                logger.info('memory_dataloader len {}'.format(len(memory_dataloader)))
-                return {'dataloader': dataloader, 'memory_dataloader': memory_dataloader}
+        assert self.training_prompt_name == 'meta_prompt'
+        dataloader = DataLoader(
+            self.dataset[type_path],
+            num_workers=self.hparams.num_workers,
+            collate_fn=self.dataset[type_path].collate_fn,
+            batch_sampler=self.dataset[type_path].make_full_data_sampler(batch_size=batch_size))
 
         logger.info('dataloader len {}'.format(len(dataloader)))
         return dataloader
@@ -461,6 +408,11 @@ class MemT5PromptDSTModule(BaseTransformer):
         print('initializing meta prompt using trained prompts')
         print(list(prompt_init_dict.items())[:10])
         self.model.initialize_metaprompt_by_trained_prompt(prompt_init_dict)
+
+    def initialize_graphprompt_by_trained_graph(self, graph_init_dict):
+        print('initializing graph prompt using trained graph prompts')
+        print(list(graph_init_dict.items())[:10])
+        self.model.initialize_graphprompt_by_trained_graph(graph_init_dict)
 
     def generate_fake_examples(self, forward_domains):
         if len(forward_domains) == 0:
