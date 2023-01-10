@@ -1,7 +1,7 @@
 import math
 import numpy as np
 import os
-os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+#os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -37,7 +37,7 @@ class ASAP_Pool(nn.Module):
         if type(self.ratio)!=list:
             self.ratio = [self.ratio for i in range(config['graph_layers'])]
 
-        self.num_features = config['slot_size']
+        self.num_features = 103 #config['slot_size']
         self.node_features = self.num_features
         self.hidden = hidden
         self.num_layers = config['graph_layers']
@@ -47,9 +47,9 @@ class ASAP_Pool(nn.Module):
         self.dropout_att = config['graph_drop']
 
         self.linear = nn.Linear(1, self.node_features)
-        self.embeddings         = nn.Embedding(self.num_features, self.node_features, padding_idx=-1) # Embeddings for the strategies (num_features is num_strategies)
-        self.embeddings.weight  = nn.Parameter(torch.FloatTensor(np.diag(np.diag(np.ones((self.num_features, self.node_features))))))  # diag matrix of 1 hot
-        self.embeddings.weight.requires_grad = True
+        #self.embeddings         = nn.Embedding(self.num_features, self.node_features, padding_idx=-1) # Embeddings for the strategies (num_features is num_strategies)
+        #self.embeddings.weight  = nn.Parameter(torch.FloatTensor(np.diag(np.diag(np.ones((self.num_features, self.node_features))))))  # diag matrix of 1 hot
+        #self.embeddings.weight.requires_grad = True
         self.conv1 = GATConv(self.node_features, self.hidden, heads=self.num_heads)
         self.pool1 = ASAP_Pooling(in_channels=self.hidden *self.num_heads, ratio=self.ratio[0], dropout_att=self.dropout_att)
         self.convs = torch.nn.ModuleList()
@@ -58,12 +58,12 @@ class ASAP_Pool(nn.Module):
             self.convs.append(GATConv(self.hidden, self.hidden, heads=self.num_heads))
             self.pools.append(ASAP_Pooling(in_channels=self.hidden, ratio=self.ratio[i], dropout_att=self.dropout_att))
         self.lin1 = nn.Linear(2*self.hidden * self.num_heads, self.hidden*103) # 2*hidden due to readout layer
-        self.lin2 = nn.Linear(self.hidden, self.num_features-1)
+        self.lin2 = nn.Linear(self.hidden, self.num_features)
         self.reset_parameters()
 
     def reset_parameters(self):
         self.linear.reset_parameters()
-        self.embeddings.reset_parameters()
+        #self.embeddings.reset_parameters()
         self.conv1.reset_parameters()
         self.pool1.reset_parameters()
         for conv, pool in zip(self.convs, self.pools):
@@ -85,9 +85,9 @@ class ASAP_Pool(nn.Module):
             x = F.relu(conv(x=x, edge_index=edge_index))
             x, edge_index, edge_weight, batch, perm = pool(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
             xs += readout(x, batch)
-        x = F.relu(self.lin1(xs))
-        out = F.dropout(x, p=0.0, training=self.training)
-        ####logits = self.lin2(x)
+        out = F.softmax(self.lin1(xs), dim=-1)
+        #x = F.dropout(x, p=0.0, training=self.training)
+        #x = self.lin2(x)
         #out = F.log_softmax(x, dim=-1)
 
         #if return_extra:

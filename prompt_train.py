@@ -238,7 +238,8 @@ def main(hparams):
                         pl.callbacks.ModelCheckpoint(filename='{jga:.4f}-{epoch}', monitor='jga', mode='max',
                                                     save_top_k=1)],
             reload_dataloaders_every_epoch=True,
-            gpus=[hparams.gpus],
+            gpus=[0],
+            #distributed_backend='ddp',
             precision=16,
             num_sanity_val_steps=4
         )

@@ -350,7 +350,7 @@ class MemT5PromptDSTModule(BaseTransformer):
                 metrics[dst_key] = sum([x[dst_key] for x in validation_step_outputs])
             metrics['jga'] = metrics['acc'] / metrics['total']
             tb_logger.add_scalar('jga/{}'.format(self.cur_domain), metrics['jga'], self.num_step)
-        self.log("Metrics logger each epoch.", metrics, on_step=False, on_epoch=True)
+        self.log("acc", metrics['acc'], on_step=False, on_epoch=True)
         return metrics
 
     def save_metrics(self, latest_metrics, type_path) -> None:
