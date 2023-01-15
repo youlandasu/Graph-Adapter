@@ -539,6 +539,7 @@ class T5ForPromptDST(T5ForConditionalGeneration):
 
         self.vocab_size = config.vocab_size
         self.prompt_size = config.num_prompt_tokens
+        self.graph_prompt_size = config.num_graph_prompt_tokens
 
         # Graph layers
         self.graph = ASAP_Pool(config.d_model, GRAPH_CONFIG) 
@@ -656,18 +657,21 @@ class T5ForPromptDST(T5ForConditionalGeneration):
         #graph embeddings
         graph_prompt_ids = input_ids - self.vocab_size - self.config.num_prompt_tokens
         graph_prompt_ids = torch.where((graph_prompt_ids >= 0) & (graph_prompt_ids < self.config.num_graph_prompt_tokens), graph_prompt_ids, torch.zeros_like(graph_prompt_ids))
+        '''# w/o gnn
+        graph_prompt_embeds = self.graph_prompt_embedder(graph_prompt_ids)
+        inputs_embeds = torch.where((input_ids < self.vocab_size+self.config.num_prompt_tokens).unsqueeze(-1), inputs_embeds, graph_prompt_embeds)
+        ''' # w/ gnn
         #graph_prompt_ids.index_put_(indices=torch.nonzero(graph_prompt_ids), values=ds_ids)
         x, edge_index, batch = batch_graph.x, batch_graph.edge_index, batch_graph.batch
-        ###x = x - self.vocab_size - self.config.num_prompt_tokens # for x is graph_prompt_ids
-        ###x = torch.where(x >= 0, x, torch.zeros_like(x))
+        x = x - self.vocab_size - self.config.num_prompt_tokens # for x is graph_prompt_ids
+        x = torch.where(x >= 0, x, torch.zeros_like(x))
         #for graph_prompt_embed in graph_prompt_embeds:
         graph_prompt_embeds = self.graph(x, edge_index, batch).view(input_ids.size(0), -1, self.model_dim) # TODO: convert graph_prompt_ids to embeds
         for i in range(input_ids.size(0)):
             if len(torch.nonzero(graph_prompt_ids[i])) > 0:
                 begin, end = torch.nonzero(graph_prompt_ids[i])[0].item(), torch.nonzero(graph_prompt_ids[i])[-1].item()
                 inputs_embeds[i, begin-1: end+1, :] = graph_prompt_embeds[i]
-        ###inputs_embeds = torch.where((input_ids < self.vocab_size+self.config.num_prompt_tokens).unsqueeze(-1), inputs_embeds, graph_prompt_embeds)
-
+        
         # meta_prompt embeddings
         meta_prompt_ids = input_ids - self.vocab_size - self.config.num_prompt_tokens - self.config.num_graph_prompt_tokens
         meta_prompt_ids = torch.where(meta_prompt_ids >= 0, meta_prompt_ids, torch.zeros_like(meta_prompt_ids))

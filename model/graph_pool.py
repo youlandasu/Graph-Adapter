@@ -31,25 +31,27 @@ def readout(x, batch):
     return torch.cat((x_mean, x_max), dim=-1)
 
 class ASAP_Pool(nn.Module):
-    def __init__(self, hidden, config):
+    def __init__(self, d_model, config):
         super(ASAP_Pool, self).__init__()
         self.ratio = 0.8
         if type(self.ratio)!=list:
             self.ratio = [self.ratio for i in range(config['graph_layers'])]
 
-        self.num_features = 103 #config['slot_size']
+        self.num_features = config['slot_size'] #103
         self.node_features = self.num_features
-        self.hidden = hidden
+        self.hidden = 256
+        self.d_model = d_model
         self.num_layers = config['graph_layers']
         self.undirected = config['undirected']
         self.self_loops = config['self_loops']
         self.num_heads  = config['graph_heads']
         self.dropout_att = config['graph_drop']
+        self.output_len = config['graph_prompt_len']
 
-        self.linear = nn.Linear(1, self.node_features)
-        #self.embeddings         = nn.Embedding(self.num_features, self.node_features, padding_idx=-1) # Embeddings for the strategies (num_features is num_strategies)
-        #self.embeddings.weight  = nn.Parameter(torch.FloatTensor(np.diag(np.diag(np.ones((self.num_features, self.node_features))))))  # diag matrix of 1 hot
-        #self.embeddings.weight.requires_grad = True
+        #self.linear = nn.Linear(1, self.node_features)
+        self.embeddings         = nn.Embedding(self.num_features, self.node_features, padding_idx=-1) # Embeddings for the strategies (num_features is num_strategies)
+        self.embeddings.weight  = nn.Parameter(torch.FloatTensor(np.diag(np.diag(np.ones((self.num_features, self.node_features))))))  # diag matrix of 1 hot
+        self.embeddings.weight.requires_grad = True
         self.conv1 = GATConv(self.node_features, self.hidden, heads=self.num_heads)
         self.pool1 = ASAP_Pooling(in_channels=self.hidden *self.num_heads, ratio=self.ratio[0], dropout_att=self.dropout_att)
         self.convs = torch.nn.ModuleList()
@@ -57,13 +59,13 @@ class ASAP_Pool(nn.Module):
         for i in range(self.num_layers - 1):
             self.convs.append(GATConv(self.hidden, self.hidden, heads=self.num_heads))
             self.pools.append(ASAP_Pooling(in_channels=self.hidden, ratio=self.ratio[i], dropout_att=self.dropout_att))
-        self.lin1 = nn.Linear(2*self.hidden * self.num_heads, self.hidden*103) # 2*hidden due to readout layer
-        self.lin2 = nn.Linear(self.hidden, self.num_features)
+        self.lin1 = nn.Linear(2*self.hidden * self.num_heads, self.hidden) # 2*hidden due to readout layer
+        self.lin2 = nn.Linear(self.hidden, d_model * self.output_len)
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.linear.reset_parameters()
-        #self.embeddings.reset_parameters()
+        #self.linear.reset_parameters()
+        self.embeddings.reset_parameters()
         self.conv1.reset_parameters()
         self.pool1.reset_parameters()
         for conv, pool in zip(self.convs, self.pools):
@@ -75,8 +77,8 @@ class ASAP_Pool(nn.Module):
     def forward(self, x, edge_index, batch):
         #data_list = self.convert_ontology_to_graph(ds_ids, ds_mask, slot_connect)
         #data = Batch.from_data_list(data_list)#.to(feats.device)
-        x = self.linear(x)
-        ###x = self.embeddings(x.squeeze(1))  # added  # x is num_graph x node_feats / 22
+        #x = self.linear(x)
+        x = self.embeddings(x.squeeze(1))  # added  # x is num_graph x node_feats / 22
         x = F.relu(self.conv1(x, edge_index))
         x, edge_index, edge_weight, batch, perm = self.pool1(x=x, edge_index=edge_index, edge_weight=None, batch=batch)
         #print(x.shape)
@@ -85,10 +87,10 @@ class ASAP_Pool(nn.Module):
             x = F.relu(conv(x=x, edge_index=edge_index))
             x, edge_index, edge_weight, batch, perm = pool(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
             xs += readout(x, batch)
-        out = F.softmax(self.lin1(xs), dim=-1)
+        x = F.relu(self.lin1(xs))
         #x = F.dropout(x, p=0.0, training=self.training)
-        #x = self.lin2(x)
-        #out = F.log_softmax(x, dim=-1)
+        x = self.lin2(x)
+        out = F.log_softmax(x, dim=-1)
 
         #if return_extra:
         #    gat_attn_wts = self.conv1.attention_score

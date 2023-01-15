@@ -15,8 +15,7 @@ import numpy as np
 from prompt_files.transformer_utils import logging
 logger = logging.get_logger(__name__)
 # logger.setLevel(logging.INFO)
-np.random.seed(42)
-random.seed(42)
+random.seed(52)
 
 class RangeIndexSampler(Sampler):
     def __init__(self, start, end):
@@ -165,11 +164,9 @@ class MemT5PromptDSTDataset(Dataset):
         extra_id_num = 0
         if do_augment:
             assert self.type_path == 'train'
-            # num_slots = self.random_generator.randint(len(slots)//2, len(slots))
             num_slots = random.randint(1, len(slots))
             slots = random.sample(slots, num_slots)
             if len(extra_aug_slots) > 0:
-                # num_extra_slots = self.random_generator.randint(1, min(len(slots)//2, len(extra_aug_slots)))
                 num_extra_slots = random.randint(1, min(len(slots), len(extra_aug_slots)))
                 extra_slots = random.sample(extra_aug_slots, num_extra_slots)
                 slots += extra_slots
@@ -349,9 +346,9 @@ class MemT5PromptDSTDataset(Dataset):
         '''
         edge_index = self.get_edge_index_from_adj_matrix(torch.Tensor(slot_connect).to(device))
         active_slots = torch.Tensor(active_slots).to(device)
-        graph_data = [Data(x=active_slots.unsqueeze(-1), edge_index=edge_index)]
-        #graph_ids = torch.where(active_slots > 0, ds_ids, 0)
-        #graph_data = [Data(x=graph_ids.unsqueeze(-1), edge_index=edge_index)]
+        #graph_data = [Data(x=active_slots.unsqueeze(-1), edge_index=edge_index)]
+        graph_ids = torch.where(active_slots > 0, ds_ids, 0)
+        graph_data = [Data(x=graph_ids.unsqueeze(-1), edge_index=edge_index)]
 
         #for i in range(len(active_slots)):
         #    if active_slots[i].item() == 1:

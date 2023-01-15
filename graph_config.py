@@ -8,4 +8,5 @@ GRAPH_CONFIG = {
     'self_loops': True,
     'graph_heads': 1,
     'graph_drop': 0.0,
+    'graph_prompt_len': 246,
 }
