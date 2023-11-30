@@ -1,3 +1,3 @@
 # Graph Prompt Adapter
 
-Code for graph adapter paper(ACL 2023).
+Code for paper "Schema Graph-Guided Prompt for Multi-Domain Dialogue State Tracking".
